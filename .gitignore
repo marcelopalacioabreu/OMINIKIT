@@ -1,0 +1,3 @@
+# Ignore Zig build caches
+**/.zig-cache/
+.zig-cache/
