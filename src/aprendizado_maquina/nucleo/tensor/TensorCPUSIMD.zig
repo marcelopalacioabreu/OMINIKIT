@@ -1,6 +1,6 @@
 const std = @import("std");
 const tensorImpl = @import("TensorImplementacao.zig");
-const computacao = @import("computacao");
+const computacao = @import("../../../computacao/ComputacaoContexto.zig");
 
 // Use shared BackendInstance from TensorImplementacao
 const Backend = tensorImpl.BackendInstance;
@@ -37,8 +37,7 @@ const simd_vtable = tensorImpl.TensorImplementacao{
 
 pub const VTABLE = simd_vtable;
 
-pub fn create_impl(ctx: *computacao.ComputacaoContextoModule.ComputacaoContexto, allocator: *std.mem.Allocator, total: usize) !*Backend {
-    _ = ctx;
+pub fn create_impl(allocator: *std.mem.Allocator, total: usize) !*Backend {
     var impl = try allocator.create(Backend);
     impl.data = try allocator.alloc(f64, total);
     impl.count = total;
