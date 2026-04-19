@@ -1,5 +1,5 @@
 const std = @import("std");
-const impl = @import("../impl.zig");
+const implementacao = @import("../ComputacaoContextoImplementacao.zig");
 const cpu = @import("cpu.zig");
 pub const Allocator = std.mem.Allocator;
 
@@ -19,9 +19,9 @@ pub fn memcpy(dst: []u8, src: []const u8) void {
     cpu.memcpy(dst, src);
 }
 
-pub const IMPL = impl.Impl{
-    .allocate = allocate,
-    .free = free,
-    .memset = memset,
-    .memcpy = memcpy,
+pub var COMPUTACAO_CONTEXTO_IMPLEMENTACAO = implementacao.ComputacaoContextoImplementacao{
+    .allocate = &allocate,
+    .free = &free,
+    .memset = &memset,
+    .memcpy = &memcpy,
 };
