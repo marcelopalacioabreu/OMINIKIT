@@ -23,7 +23,9 @@ test "conv and backward CPU (moved test)" {
     out.backward(&allocator, &grad);
 
     var any_nonzero: bool = false;
-    for (0..input.size) |i| if (input.impl_ptr.grad[i] != 0.0) any_nonzero = true;
+    for (0..input.size) |i| {
+        if (input.impl_ptr.grad[i] != 0.0) any_nonzero = true;
+    }
     try std.testing.expect(any_nonzero);
 }
 
@@ -47,6 +49,8 @@ test "conv and backward CPUSIMD (moved test)" {
     out.backward(&allocator, &grad);
 
     var any_nonzero: bool = false;
-    for (0..input.size) |i| if (input.impl_ptr.grad[i] != 0.0) any_nonzero = true;
+    for (0..input.size) |i| {
+        if (input.impl_ptr.grad[i] != 0.0) any_nonzero = true;
+    }
     try std.testing.expect(any_nonzero);
 }

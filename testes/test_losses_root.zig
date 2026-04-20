@@ -16,7 +16,9 @@ test "MSE loss backward CPU and CPUSIMD (moved)" {
     const grad = [_]f64{1.0};
     out.backward(&alloc, &grad);
     var any_nonzero: bool = false;
-    for (0..a.size) |i| if (a.impl_ptr.grad[i] != 0.0) any_nonzero = true;
+    for (0..a.size) |i| {
+        if (a.impl_ptr.grad[i] != 0.0) any_nonzero = true;
+    }
     try std.testing.expect(any_nonzero);
 
     // CPUSIMD
@@ -30,7 +32,9 @@ test "MSE loss backward CPU and CPUSIMD (moved)" {
     defer out2.destroy(&alloc);
     out2.backward(&alloc, &grad);
     var any_nonzero2: bool = false;
-    for (0..a2.size) |i| if (a2.impl_ptr.grad[i] != 0.0) any_nonzero2 = true;
+    for (0..a2.size) |i| {
+        if (a2.impl_ptr.grad[i] != 0.0) any_nonzero2 = true;
+    }
     try std.testing.expect(any_nonzero2);
 }
 
@@ -47,6 +51,8 @@ test "Focal loss backward CPU (moved)" {
     const grad = [_]f64{1.0};
     out.backward(&alloc, &grad);
     var any_nonzero: bool = false;
-    for (0..a.size) |i| if (a.impl_ptr.grad[i] != 0.0) any_nonzero = true;
+    for (0..a.size) |i| {
+        if (a.impl_ptr.grad[i] != 0.0) any_nonzero = true;
+    }
     try std.testing.expect(any_nonzero);
 }
