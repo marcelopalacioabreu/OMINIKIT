@@ -1,7 +1,7 @@
 const std = @import("std");
-const computacao = @import("src/computacao/ComputacaoContexto.zig");
-const FabricaFuncoesPerda = @import("src/aprendizado_maquina/nucleo/funcoesPerda/FabricaFuncoesPerda.zig").FabricaFuncoesPerda;
-const FabricaTensor = @import("src/aprendizado_maquina/nucleo/tensor/FabricaTensor.zig").FabricaTensor;
+const computacao = @import("../src/computacao/ComputacaoContexto.zig");
+const FabricaFuncoesPerda = @import("../src/aprendizado_maquina/nucleo/funcoesPerda/FabricaFuncoesPerda.zig").FabricaFuncoesPerda;
+const FabricaTensor = @import("../src/aprendizado_maquina/nucleo/tensor/FabricaTensor.zig").FabricaTensor;
 
 test "MSE loss backward CPU and CPUSIMD (moved)" {
     var alloc = std.heap.page_allocator;

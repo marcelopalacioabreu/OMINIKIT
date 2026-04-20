@@ -1,7 +1,7 @@
 const std = @import("std");
 
-const computacao = @import("src/computacao/ComputacaoContexto.zig");
-const FabricaTensor = @import("src/aprendizado_maquina/nucleo/tensor/FabricaTensor.zig").FabricaTensor;
+const computacao = @import("../src/computacao/ComputacaoContexto.zig");
+const FabricaTensor = @import("../src/aprendizado_maquina/nucleo/tensor/FabricaTensor.zig").FabricaTensor;
 
 test "conv and backward CPU (moved test)" {
     var allocator = std.heap.page_allocator;

@@ -1,10 +1,9 @@
 const std = @import("std");
 
-const computacao = @import("src/computacao/ComputacaoContexto.zig");
-const FabricaTensor = @import("src/aprendizado_maquina/nucleo/tensor/FabricaTensor.zig").FabricaTensor;
-const Tensor = @import("src/aprendizado_maquina/nucleo/tensor/Tensor.zig").Tensor;
+const computacao = @import("../src/computacao/ComputacaoContexto.zig");
+const FabricaTensor = @import("../src/aprendizado_maquina/nucleo/tensor/FabricaTensor.zig").FabricaTensor;
 
-test "matmul and backward CPU (root test)" {
+test "matmul and backward CPU (moved)" {
     var allocator = std.heap.page_allocator;
     var ctx = computacao.ComputacaoCPUContexto();
     var ft = FabricaTensor.init(&ctx, &allocator);
@@ -30,7 +29,7 @@ test "matmul and backward CPU (root test)" {
     try std.testing.expect(any_nonzero);
 }
 
-test "matmul and backward CPUSIMD (root test)" {
+test "matmul and backward CPUSIMD (moved)" {
     var allocator = std.heap.page_allocator;
     var ctx = computacao.ComputacaoCPUSIMDContexto();
     var ft = FabricaTensor.init(&ctx, &allocator);
