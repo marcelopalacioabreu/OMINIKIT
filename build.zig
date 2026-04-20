@@ -18,4 +18,9 @@ pub fn build(b: *std.Build) void {
     b.getInstallStep().dependOn(&run_conv.step);
     b.getInstallStep().dependOn(&run_losses.step);
     b.getInstallStep().dependOn(&run_layers.step);
+
+    // Note: vendor C sources (e.g., stb_image.c) are not automatically compiled here
+    // due to differing Zig stdlib Build APIs across versions. If you add
+    // vendor/stb_image.c, compile it manually or extend this build.zig for
+    // your Zig std version.
 }

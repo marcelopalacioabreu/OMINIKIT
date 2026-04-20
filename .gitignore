@@ -1,3 +1,7 @@
 # Ignore Zig build caches
 **/.zig-cache/
 .zig-cache/
+vendor/
+
+# OMINIKIT vendor directory (image libs, etc.)
+OMINIKIT/vendor/
