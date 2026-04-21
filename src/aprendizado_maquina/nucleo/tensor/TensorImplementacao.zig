@@ -39,6 +39,12 @@ pub const BatchNormUserData = struct {
     n: usize,
 };
 
+pub const AddUserData = struct {
+    a: *BackendInstance,
+    b: *BackendInstance,
+    n: usize,
+};
+
 pub const MSEUserData = struct {
     pred: *BackendInstance,
     target: *BackendInstance,
@@ -69,6 +75,7 @@ pub const AnyUserData = union(enum) {
     matmul: MatMulUserData,
     conv: ConvUserData,
     batchnorm: BatchNormUserData,
+        add: AddUserData,
     mse: MSEUserData,
     focal: FocalUserData,
     bce: BCEUserData,

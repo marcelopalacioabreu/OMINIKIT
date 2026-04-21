@@ -86,6 +86,12 @@ pub const Tensor = struct {
         for (0..self.size) |i| {
             res.set(i, self.get(i) + other.get(i));
         }
+        // attach add userdata for backward
+        const ud = try allocator.create(tensorImpl.AnyUserData);
+        ud.* = .{ .add = .{ .a = self.impl_ptr, .b = other.impl_ptr, .n = self.size } };
+        res.impl_ptr.user = ud;
+        // set CPU backward by default (works for both CPU and CPUSIMD impl_ptrs)
+        res.grad_fn = &cpu.cpu_add_backward;
         return res;
     }
 

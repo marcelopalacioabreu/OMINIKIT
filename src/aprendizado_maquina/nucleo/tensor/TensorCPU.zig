@@ -165,6 +165,20 @@ pub fn cpu_batchnorm_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: [
     }
 }
 
+pub fn cpu_add_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: []const f64) void {
+    const udptr = impl_ptr.user orelse return;
+    const ud = udptr.*;
+    const a = ud.add.a.*;
+    const b = ud.add.b.*;
+    const n = ud.add.n;
+    const has_scalar_upstream = grad.len == 1;
+    for (0..n) |i| {
+        const upstream = if (has_scalar_upstream) grad[0] else grad[i];
+        a.grad[i] += upstream;
+        b.grad[i] += upstream;
+    }
+}
+
 pub fn cpu_bce_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: []const f64) void {
     const udptr = impl_ptr.user orelse return;
     const ud = udptr.*;
