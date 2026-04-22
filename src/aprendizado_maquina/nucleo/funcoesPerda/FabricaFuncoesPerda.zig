@@ -31,9 +31,10 @@ pub const FabricaFuncoesPerda = struct {
         for (0..n) |i| {
             const p = pred.get(i);
             const t = target.get(i);
+            const s = 1.0 / (1.0 + std.math.exp(-p));
             const eps = 1e-12;
-            const pc = if (p < eps) eps else if (p > 1.0 - eps) 1.0 - eps else p;
-            sum += -(t * std.math.log(f64, 2.718281828459045, pc) + (1.0 - t) * std.math.log(f64, 2.718281828459045, 1.0 - pc));
+            const sc = if (s < eps) eps else if (s > 1.0 - eps) 1.0 - eps else s;
+            sum += -(t * std.math.log(f64, 2.718281828459045, sc) + (1.0 - t) * std.math.log(f64, 2.718281828459045, 1.0 - sc));
         }
         var denom: f64 = 0.0;
         for (0..n) |_| denom += 1.0;

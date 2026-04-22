@@ -13,6 +13,7 @@ pub const Tensor = struct {
     size: usize,
     requires_grad: bool,
     grad_fn: ?*const fn (impl_ptr: *tensorImpl.BackendInstance, allocator: *std.mem.Allocator, grad: []const f64) void,
+    next_in_graph: ?*Tensor,
 
     pub fn init(ctx: *ComputacaoContextoModule.ComputacaoContexto, allocator: *std.mem.Allocator, shape_in: []const usize) !*Tensor {
         var total: usize = 1;
@@ -46,7 +47,28 @@ pub const Tensor = struct {
         obj.shape = shape_buf[0..shape_in.len];
         obj.size = total;
         obj.requires_grad = false;
+        obj.grad_fn = null;
+        // register in autograd graph (newest at head)
+        obj.next_in_graph = graph_head;
+        graph_head = obj;
         return obj;
+    }
+
+    // Global simple autograd graph (linked list of created Tensors)
+    // New tensors are pushed to head during creation; run_autograd_backward_all
+    // iterates head..tail calling each tensor's grad_fn with its impl.grad.
+    pub fn clear_autograd_graph() void {
+        graph_head = null;
+    }
+
+    pub fn run_autograd_backward_all(allocator: *std.mem.Allocator) void {
+        var cur = graph_head;
+        while (cur) |node| {
+            // call backward with stored impl grad
+            node.backward(allocator, node.impl_ptr.grad);
+            cur = node.next_in_graph;
+        }
+        graph_head = null;
     }
 
     pub fn fromArray(ctx: *ComputacaoContextoModule.ComputacaoContexto, allocator: *std.mem.Allocator, shape_in: []const usize, data: []const f64) !*Tensor {
@@ -156,6 +178,9 @@ pub const Tensor = struct {
                 ud.* = .{ .matmul = .{ .a = self.impl_ptr, .b = other.impl_ptr, .m = m, .n = n, .p = p } };
                 out_impl.user = ud;
                 obj.grad_fn = &cpusimd.simd_matmul_backward;
+                // register CPUSIMD-created Tensor in autograd graph
+                obj.next_in_graph = graph_head;
+                graph_head = obj;
                 result = obj;
             },
             else => {
@@ -348,3 +373,5 @@ pub const Tensor = struct {
         return obj;
     }
 };
+
+var graph_head: ?*Tensor = null;

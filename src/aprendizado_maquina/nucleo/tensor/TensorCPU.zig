@@ -177,6 +177,65 @@ pub fn cpu_add_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: []const
         a.grad[i] += upstream;
         b.grad[i] += upstream;
     }
+    if (n > 0) std.debug.print("cpu_add_backward: a.grad[0]={}, b.grad[0]={}\n", .{a.grad[0], b.grad[0]});
+}
+
+pub fn cpu_relu_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: []const f64) void {
+    const udptr = impl_ptr.user orelse return;
+    const ud = udptr.*;
+    const inb = ud.relu.input.*;
+    const outb = impl_ptr.*;
+    const n = outb.count;
+    const has_scalar_upstream = grad.len == 1;
+    for (0..n) |i| {
+        const upstream = if (has_scalar_upstream) grad[0] else grad[i];
+        const v = outb.data[i];
+        if (v > 0.0) {
+            inb.grad[i] += upstream;
+        } else {
+            inb.grad[i] += 0.0;
+        }
+    }
+}
+
+pub fn cpu_poolavg_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: []const f64) void {
+    const udptr = impl_ptr.user orelse return;
+    const ud = udptr.*;
+    const inp = ud.poolavg.input.*;
+    const pH = ud.poolavg.pH;
+    const pW = ud.poolavg.pW;
+    const in_w = ud.poolavg.in_w;
+    const out_h = ud.poolavg.out_h;
+    const out_w = ud.poolavg.out_w;
+    const channels = ud.poolavg.channels;
+
+    const gptr = grad;
+
+    // zero input grads
+    for (0..inp.count) |i| {
+        inp.grad[i] = 0.0;
+    }
+
+    const pool_area = @as(f64, @floatFromInt(pH * pW));
+    var idx: usize = 0;
+    for (0..out_h) |oh| {
+        for (0..out_w) |ow| {
+            for (0..channels) |c| {
+                const gout = gptr[idx];
+                const start_h = oh * pH;
+                const start_w = ow * pW;
+                for (0..pH) |ph| {
+                    for (0..pW) |pw| {
+                        const ih = start_h + ph;
+                        const iw = start_w + pw;
+                        const in_idx = (ih * in_w + iw) * channels + c;
+                        inp.grad[in_idx] += gout / pool_area;
+                    }
+                }
+                idx += 1;
+            }
+        }
+    }
 }
 
 pub fn cpu_bce_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: []const f64) void {
@@ -191,11 +250,12 @@ pub fn cpu_bce_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: []const
         const p = pred.data[i];
         const t = target.data[i];
         const upstream = if (has_scalar_upstream) grad[0] else grad[i];
-        const eps = 1e-12;
-        const pc = if (p < eps) eps else if (p > 1.0 - eps) 1.0 - eps else p;
-        const dp = -(t / pc) + ((1.0 - t) / (1.0 - pc));
+        const s = 1.0 / (1.0 + std.math.exp(-p));
+        const dp = s - t; // d loss / d logit = sigmoid(logit) - target
         pred.grad[i] += upstream * dp;
     }
+    // debug: print first pred grad
+    if (n > 0) std.debug.print("cpu_bce_backward: pred.grad[0]={}\n", .{pred.grad[0]});
 }
 
 pub fn cpu_mse_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: []const f64) void {

@@ -45,6 +45,21 @@ pub const AddUserData = struct {
     n: usize,
 };
 
+pub const ReluUserData = struct {
+    input: *BackendInstance,
+};
+
+pub const PoolAvgUserData = struct {
+    input: *BackendInstance,
+    pH: usize,
+    pW: usize,
+    in_h: usize,
+    in_w: usize,
+    out_h: usize,
+    out_w: usize,
+    channels: usize,
+};
+
 pub const MSEUserData = struct {
     pred: *BackendInstance,
     target: *BackendInstance,
@@ -80,6 +95,8 @@ pub const AnyUserData = union(enum) {
     focal: FocalUserData,
     bce: BCEUserData,
     smoothl1: SmoothL1UserData,
+    relu: ReluUserData,
+    poolavg: PoolAvgUserData,
 };
 
 pub const TensorError = error{OutOfMemory};

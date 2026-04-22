@@ -15,6 +15,19 @@ pub const ActivationLayer = struct {
             const v = input.get(i);
             if (v > 0.0) out.set(i, v) else out.set(i, 0.0);
         }
+        // attach userdata so backward can transfer gradients to input
+        const impl = out.impl_ptr;
+        const tensorImpl = @import("../../nucleo/tensor/TensorImplementacao.zig");
+        const cpu = @import("../../nucleo/tensor/TensorCPU.zig");
+        const ud = try allocator.create(tensorImpl.AnyUserData);
+        ud.* = .{ .relu = .{ .input = input.impl_ptr } };
+        impl.user = ud;
+        // set correct backward based on backend
+        switch (input.tipo) {
+            .CPU => out.grad_fn = &cpu.cpu_relu_backward,
+            .CPUSIMD => out.grad_fn = &cpu.cpu_relu_backward,
+            else => out.grad_fn = &cpu.cpu_relu_backward,
+        }
         return out;
     }
 };

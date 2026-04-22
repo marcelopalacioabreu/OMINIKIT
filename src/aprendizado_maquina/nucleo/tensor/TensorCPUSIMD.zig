@@ -117,6 +117,7 @@ pub fn simd_matmul_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: []c
             b.grad[k * p + j] += sum;
         }
     }
+    if (n * p > 0) std.debug.print("simd_matmul_backward: b_ptr={}, b.grad[0]={}, a.data[0]={}, upstream_sample={}\n", .{@intFromPtr(ud.matmul.b), b.grad[0], a.data[0], (if (grad.len>0) grad[0] else 0)});
 }
 
 // Very small, generic 2D convolution helper. Assumes input is 2D stored row-major
@@ -264,6 +265,24 @@ pub fn simd_batchnorm_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: 
     }
 }
 
+pub fn simd_relu_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: []const f64) void {
+    const udptr = impl_ptr.user orelse return;
+    const ud = udptr.*;
+    const inb = ud.relu.input.*;
+    const outb = impl_ptr.*;
+    const n = outb.count;
+    const has_scalar_upstream = grad.len == 1;
+    for (0..n) |i| {
+        const upstream = if (has_scalar_upstream) grad[0] else grad[i];
+        const v = outb.data[i];
+        if (v > 0.0) {
+            inb.grad[i] += upstream;
+        } else {
+            inb.grad[i] += 0.0;
+        }
+    }
+}
+
 pub fn simd_mse_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: []const f64) void {
     const udptr = impl_ptr.user orelse return;
     const ud = udptr.*;
@@ -333,11 +352,11 @@ pub fn simd_bce_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: []cons
         const p = pred.data[i];
         const t = target.data[i];
         const upstream = if (has_scalar_upstream) grad[0] else grad[i];
-        const eps = 1e-12;
-        const pc = if (p < eps) eps else if (p > 1.0 - eps) 1.0 - eps else p;
-        const dp = -(t / pc) + ((1.0 - t) / (1.0 - pc));
+        const s = 1.0 / (1.0 + std.math.exp(-p));
+        const dp = s - t;
         pred.grad[i] += upstream * dp;
     }
+    if (n > 0) std.debug.print("simd_bce_backward: pred.grad[0]={}\n", .{pred.grad[0]});
 }
 
 pub fn simd_smoothl1_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: []const f64) void {
@@ -361,5 +380,44 @@ pub fn simd_smoothl1_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: [
             dp = if (d < 0.0) -1.0 else 1.0;
         }
         pred.grad[i] += upstream * dp;
+    }
+}
+
+pub fn simd_poolavg_backward(impl_ptr: *Backend, _: *std.mem.Allocator, grad: []const f64) void {
+    const udptr = impl_ptr.user orelse return;
+    const ud = udptr.*;
+    const inp = ud.poolavg.input.*;
+    const pH = ud.poolavg.pH;
+    const pW = ud.poolavg.pW;
+    const in_w = ud.poolavg.in_w;
+    const out_h = ud.poolavg.out_h;
+    const out_w = ud.poolavg.out_w;
+    const channels = ud.poolavg.channels;
+
+    const gptr = grad;
+
+    for (0..inp.count) |i| {
+        inp.grad[i] = 0.0;
+    }
+
+    const pool_area = @as(f64, @floatFromInt(pH * pW));
+    var idx: usize = 0;
+    for (0..out_h) |oh| {
+        for (0..out_w) |ow| {
+            for (0..channels) |c| {
+                const gout = gptr[idx];
+                const start_h = oh * pH;
+                const start_w = ow * pW;
+                for (0..pH) |ph| {
+                    for (0..pW) |pw| {
+                        const ih = start_h + ph;
+                        const iw = start_w + pw;
+                        const in_idx = (ih * in_w + iw) * channels + c;
+                        inp.grad[in_idx] += gout / pool_area;
+                    }
+                }
+                idx += 1;
+            }
+        }
     }
 }
