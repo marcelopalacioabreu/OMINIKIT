@@ -60,6 +60,21 @@ pub const PoolAvgUserData = struct {
     channels: usize,
 };
 
+pub const PoolMaxUserData = struct {
+    input: *BackendInstance,
+    pH: usize,
+    pW: usize,
+    in_h: usize,
+    in_w: usize,
+    out_h: usize,
+    out_w: usize,
+    channels: usize,
+};
+
+pub const SigmoidUserData = struct {
+    input: *BackendInstance,
+};
+
 pub const MSEUserData = struct {
     pred: *BackendInstance,
     target: *BackendInstance,
@@ -97,6 +112,8 @@ pub const AnyUserData = union(enum) {
     smoothl1: SmoothL1UserData,
     relu: ReluUserData,
     poolavg: PoolAvgUserData,
+    poolmax: PoolMaxUserData,
+    sigmoid: SigmoidUserData,
 };
 
 pub const TensorError = error{OutOfMemory};

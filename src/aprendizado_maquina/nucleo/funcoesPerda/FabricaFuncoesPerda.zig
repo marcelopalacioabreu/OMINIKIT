@@ -25,16 +25,16 @@ pub const FabricaFuncoesPerda = struct {
 
     pub fn BCE(_ctx: *computacao.ComputacaoContexto, allocator: *std.mem.Allocator, pred: *tensorMod.Tensor, target: *tensorMod.Tensor) !*tensorMod.Tensor {
         if (pred.size != target.size) return error.InvalidArgument;
-        // compute scalar loss using CPU implementation for now
+        // compute scalar loss assuming `pred` is probability (after sigmoid)
         var sum: f64 = 0.0;
         const n = pred.size;
+        const eps: f64 = 1e-12;
         for (0..n) |i| {
-            const p = pred.get(i);
+            var p = pred.get(i);
             const t = target.get(i);
-            const s = 1.0 / (1.0 + std.math.exp(-p));
-            const eps = 1e-12;
-            const sc = if (s < eps) eps else if (s > 1.0 - eps) 1.0 - eps else s;
-            sum += -(t * std.math.log(f64, 2.718281828459045, sc) + (1.0 - t) * std.math.log(f64, 2.718281828459045, 1.0 - sc));
+            if (p < eps) p = eps;
+            if (p > 1.0 - eps) p = 1.0 - eps;
+            sum += -(t * std.math.log(f64, 2.718281828459045, p) + (1.0 - t) * std.math.log(f64, 2.718281828459045, 1.0 - p));
         }
         var denom: f64 = 0.0;
         for (0..n) |_| denom += 1.0;

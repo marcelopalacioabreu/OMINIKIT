@@ -14,6 +14,7 @@ pub const Tensor = struct {
     requires_grad: bool,
     grad_fn: ?*const fn (impl_ptr: *tensorImpl.BackendInstance, allocator: *std.mem.Allocator, grad: []const f64) void,
     next_in_graph: ?*Tensor,
+    user_data: ?*tensorImpl.AnyUserData,
 
     pub fn init(ctx: *ComputacaoContextoModule.ComputacaoContexto, allocator: *std.mem.Allocator, shape_in: []const usize) !*Tensor {
         var total: usize = 1;
@@ -48,6 +49,7 @@ pub const Tensor = struct {
         obj.size = total;
         obj.requires_grad = false;
         obj.grad_fn = null;
+        obj.user_data = null;
         // register in autograd graph (newest at head)
         obj.next_in_graph = graph_head;
         graph_head = obj;
@@ -61,13 +63,224 @@ pub const Tensor = struct {
         graph_head = null;
     }
 
-    pub fn run_autograd_backward_all(allocator: *std.mem.Allocator) void {
+    pub fn run_autograd_backward_all(allocator: *std.mem.Allocator) !void {
+        // Build reverse-topological order by DFS from seeded nodes (impl.grad != 0)
+        // Count nodes to size temporary arrays
+        var total_nodes: usize = 0;
+        var tmp = graph_head;
+        while (tmp) |n| { total_nodes += 1; tmp = n.next_in_graph; }
+
+        var visited = try allocator.alloc(*tensorImpl.BackendInstance, total_nodes);
+        var visited_len: usize = 0;
+        var topo = try allocator.alloc(*tensorImpl.BackendInstance, total_nodes);
+        var topo_len: usize = 0;
+        var stack = try allocator.alloc(*tensorImpl.BackendInstance, total_nodes);
+        var stack_len: usize = 0;
+
+        // inline contains logic will be used below
+
         var cur = graph_head;
         while (cur) |node| {
-            // call backward with stored impl grad
-            node.backward(allocator, node.impl_ptr.grad);
+            const impl = node.impl_ptr;
+            // if this impl has a non-zero grad we treat it as a root
+            var nonzero: bool = false;
+            var _gi: usize = 0;
+            while (_gi < impl.count) : (_gi += 1) {
+                if (impl.grad[_gi] != 0.0) nonzero = true;
+            }
+            if (nonzero) {
+                // iterative DFS using stack
+                stack[stack_len] = impl; stack_len += 1;
+                while (stack_len > 0) {
+                    const top = stack[stack_len - 1];
+                    var seen_top: bool = false;
+                    var _i: usize = 0;
+                    while (_i < visited_len) : (_i += 1) {
+                        if (visited[_i] == top) { seen_top = true; break; }
+                    }
+                    if (seen_top) {
+                        stack_len -= 1;
+                        continue;
+                    }
+                    // explore children (inputs)
+                    var pushedChild = false;
+                        // build impl -> owner mapping to avoid dereferencing possibly-dangling impl.user
+                        var impls = try allocator.alloc(*tensorImpl.BackendInstance, total_nodes);
+                        var owners = try allocator.alloc(?*Tensor, total_nodes);
+                        var map_len: usize = 0;
+                        var it = graph_head;
+                        while (it) |n| {
+                            impls[map_len] = n.impl_ptr;
+                            owners[map_len] = n;
+                            map_len += 1;
+                            it = n.next_in_graph;
+                        }
+                        // find owner Tensor and its user_data (safer than impl.user)
+                        var owner: ?*Tensor = null;
+                        var mi: usize = 0;
+                        while (mi < map_len) : (mi += 1) {
+                            if (impls[mi] == top) { owner = owners[mi]; break; }
+                        }
+                        if (owner) |own| {
+                            if (own.user_data) |udp| {
+                                const ud = udp.*;
+                                switch (ud) {
+                            .matmul => |m| {
+                                var _i2: usize = 0; var found_m_a: bool = false;
+                                while (_i2 < visited_len) : (_i2 += 1) {
+                                    if (visited[_i2] == m.a) { found_m_a = true; break; }
+                                }
+                                if (!found_m_a) { stack[stack_len] = m.a; stack_len += 1; pushedChild = true; }
+                                var _i3: usize = 0; var found_m_b: bool = false;
+                                while (_i3 < visited_len) : (_i3 += 1) {
+                                    if (visited[_i3] == m.b) { found_m_b = true; break; }
+                                }
+                                if (!found_m_b) { stack[stack_len] = m.b; stack_len += 1; pushedChild = true; }
+                            },
+                            .conv => |c| {
+                                var _i4: usize = 0; var found_c_in: bool = false;
+                                while (_i4 < visited_len) : (_i4 += 1) {
+                                    if (visited[_i4] == c.input) { found_c_in = true; break; }
+                                }
+                                if (!found_c_in) { stack[stack_len] = c.input; stack_len += 1; pushedChild = true; }
+                                var _i5: usize = 0; var found_c_k: bool = false;
+                                while (_i5 < visited_len) : (_i5 += 1) {
+                                    if (visited[_i5] == c.kernel) { found_c_k = true; break; }
+                                }
+                                if (!found_c_k) { stack[stack_len] = c.kernel; stack_len += 1; pushedChild = true; }
+                            },
+                            .batchnorm => |b| {
+                                var _i6: usize = 0; var found_b: bool = false;
+                                while (_i6 < visited_len) : (_i6 += 1) {
+                                    if (visited[_i6] == b.input) { found_b = true; break; }
+                                }
+                                if (!found_b) { stack[stack_len] = b.input; stack_len += 1; pushedChild = true; }
+                            },
+                            .add => |a| {
+                                var _i7: usize = 0; var found_aa: bool = false;
+                                while (_i7 < visited_len) : (_i7 += 1) {
+                                    if (visited[_i7] == a.a) { found_aa = true; break; }
+                                }
+                                if (!found_aa) { stack[stack_len] = a.a; stack_len += 1; pushedChild = true; }
+                                var _i8: usize = 0; var found_ab: bool = false;
+                                while (_i8 < visited_len) : (_i8 += 1) {
+                                    if (visited[_i8] == a.b) { found_ab = true; break; }
+                                }
+                                if (!found_ab) { stack[stack_len] = a.b; stack_len += 1; pushedChild = true; }
+                            },
+                            .relu => |r| {
+                                var _i9: usize = 0; var found_r: bool = false;
+                                while (_i9 < visited_len) : (_i9 += 1) {
+                                    if (visited[_i9] == r.input) { found_r = true; break; }
+                                }
+                                if (!found_r) { stack[stack_len] = r.input; stack_len += 1; pushedChild = true; }
+                            },
+                            .poolavg => |p| {
+                                var _i10: usize = 0; var found_pa: bool = false;
+                                while (_i10 < visited_len) : (_i10 += 1) {
+                                    if (visited[_i10] == p.input) { found_pa = true; break; }
+                                }
+                                if (!found_pa) { stack[stack_len] = p.input; stack_len += 1; pushedChild = true; }
+                            },
+                            .poolmax => |p| {
+                                var _i11: usize = 0; var found_pm: bool = false;
+                                while (_i11 < visited_len) : (_i11 += 1) {
+                                    if (visited[_i11] == p.input) { found_pm = true; break; }
+                                }
+                                if (!found_pm) { stack[stack_len] = p.input; stack_len += 1; pushedChild = true; }
+                            },
+                            .sigmoid => |s| {
+                                var _i12: usize = 0; var found_s: bool = false;
+                                while (_i12 < visited_len) : (_i12 += 1) {
+                                    if (visited[_i12] == s.input) { found_s = true; break; }
+                                }
+                                if (!found_s) { stack[stack_len] = s.input; stack_len += 1; pushedChild = true; }
+                            },
+                            .mse => |m| {
+                                var _i13: usize = 0; var found_mp: bool = false;
+                                while (_i13 < visited_len) : (_i13 += 1) {
+                                    if (visited[_i13] == m.pred) { found_mp = true; break; }
+                                }
+                                if (!found_mp) { stack[stack_len] = m.pred; stack_len += 1; pushedChild = true; }
+                                var _i14: usize = 0; var found_mt: bool = false;
+                                while (_i14 < visited_len) : (_i14 += 1) {
+                                    if (visited[_i14] == m.target) { found_mt = true; break; }
+                                }
+                                if (!found_mt) { stack[stack_len] = m.target; stack_len += 1; pushedChild = true; }
+                            },
+                            .bce => |b| {
+                                var _i15: usize = 0; var found_bp: bool = false;
+                                while (_i15 < visited_len) : (_i15 += 1) {
+                                    if (visited[_i15] == b.pred) { found_bp = true; break; }
+                                }
+                                if (!found_bp) { stack[stack_len] = b.pred; stack_len += 1; pushedChild = true; }
+                                var _i16: usize = 0; var found_bt: bool = false;
+                                while (_i16 < visited_len) : (_i16 += 1) {
+                                    if (visited[_i16] == b.target) { found_bt = true; break; }
+                                }
+                                if (!found_bt) { stack[stack_len] = b.target; stack_len += 1; pushedChild = true; }
+                            },
+                            .smoothl1 => |s| {
+                                var _i17: usize = 0; var found_sp: bool = false;
+                                while (_i17 < visited_len) : (_i17 += 1) {
+                                    if (visited[_i17] == s.pred) { found_sp = true; break; }
+                                }
+                                if (!found_sp) { stack[stack_len] = s.pred; stack_len += 1; pushedChild = true; }
+                                var _i18: usize = 0; var found_st: bool = false;
+                                while (_i18 < visited_len) : (_i18 += 1) {
+                                    if (visited[_i18] == s.target) { found_st = true; break; }
+                                }
+                                if (!found_st) { stack[stack_len] = s.target; stack_len += 1; pushedChild = true; }
+                            },
+                            .focal => |f| {
+                                var _i19: usize = 0; var found_fp: bool = false;
+                                while (_i19 < visited_len) : (_i19 += 1) {
+                                    if (visited[_i19] == f.pred) { found_fp = true; break; }
+                                }
+                                if (!found_fp) { stack[stack_len] = f.pred; stack_len += 1; pushedChild = true; }
+                                var _i20: usize = 0; var found_ft: bool = false;
+                                while (_i20 < visited_len) : (_i20 += 1) {
+                                    if (visited[_i20] == f.target) { found_ft = true; break; }
+                                }
+                                if (!found_ft) { stack[stack_len] = f.target; stack_len += 1; pushedChild = true; }
+                            },
+                        }
+                        }
+                    }
+                    if (!pushedChild) {
+                        // all children pushed/visited, record this node
+                        visited[visited_len] = top; visited_len += 1;
+                        topo[topo_len] = top; topo_len += 1;
+                        stack_len -= 1;
+                    }
+                }
+            }
             cur = node.next_in_graph;
         }
+
+        // Call backward on nodes in reverse of topo (i.e., from roots downwards)
+        var idx: usize = topo_len;
+        while (idx > 0) {
+            idx -= 1;
+            const impl = topo[idx];
+            // find owning Tensor to get grad_fn
+            var found: ?*Tensor = null;
+            var s = graph_head;
+            while (s) |n| {
+                if (n.impl_ptr == impl) { found = n; break; }
+                s = n.next_in_graph;
+            }
+            if (found) |t| {
+                // ensure impl.user points to the owner's user_data for backward funcs
+                impl.user = t.user_data;
+                if (t.grad_fn) |fnptr| {
+                    fnptr(impl, allocator, impl.grad);
+                }
+            }
+        }
+        allocator.free(visited);
+        allocator.free(topo);
+        allocator.free(stack);
         graph_head = null;
     }
 
@@ -112,8 +325,12 @@ pub const Tensor = struct {
         const ud = try allocator.create(tensorImpl.AnyUserData);
         ud.* = .{ .add = .{ .a = self.impl_ptr, .b = other.impl_ptr, .n = self.size } };
         res.impl_ptr.user = ud;
+    res.user_data = ud;
         // set CPU backward by default (works for both CPU and CPUSIMD impl_ptrs)
         res.grad_fn = &cpu.cpu_add_backward;
+        // register CPU-created op output in autograd graph
+        res.next_in_graph = graph_head;
+        graph_head = res;
         return res;
     }
 
@@ -160,7 +377,11 @@ pub const Tensor = struct {
                 const ud = try allocator.create(tensorImpl.AnyUserData);
                 ud.* = .{ .matmul = .{ .a = self.impl_ptr, .b = other.impl_ptr, .m = m, .n = n, .p = p } };
                 result.impl_ptr.user = ud;
+                result.user_data = ud;
                 result.grad_fn = &cpu.cpu_matmul_backward;
+                // register CPU-created op output in autograd graph
+                result.next_in_graph = graph_head;
+                graph_head = result;
             },
             .CPUSIMD => {
                 const out_impl = try cpusimd.simd_matMul(allocator, self.impl_ptr, other.impl_ptr, m, n, p);
@@ -177,6 +398,7 @@ pub const Tensor = struct {
                 const ud = try allocator.create(tensorImpl.AnyUserData);
                 ud.* = .{ .matmul = .{ .a = self.impl_ptr, .b = other.impl_ptr, .m = m, .n = n, .p = p } };
                 out_impl.user = ud;
+                obj.user_data = ud;
                 obj.grad_fn = &cpusimd.simd_matmul_backward;
                 // register CPUSIMD-created Tensor in autograd graph
                 obj.next_in_graph = graph_head;
@@ -226,7 +448,11 @@ pub const Tensor = struct {
                 const ud = try allocator.create(tensorImpl.AnyUserData);
                 ud.* = .{ .batchnorm = .{ .input = self.impl_ptr, .out = res.impl_ptr, .denom = denom, .n = n } };
                 res.impl_ptr.user = ud;
+                res.user_data = ud;
                 res.grad_fn = &cpu.cpu_batchnorm_backward;
+                // register CPU-created op output in autograd graph
+                res.next_in_graph = graph_head;
+                graph_head = res;
                 result = res;
             },
             .CPUSIMD => {
@@ -255,7 +481,57 @@ pub const Tensor = struct {
                 const ud = try allocator.create(tensorImpl.AnyUserData);
                 ud.* = .{ .batchnorm = .{ .input = self.impl_ptr, .out = out_impl, .denom = denom, .n = self.size } };
                 out_impl.user = ud;
+                obj.user_data = ud;
                 obj.grad_fn = &cpusimd.simd_batchnorm_backward;
+                result = obj;
+            },
+            else => return error.InvalidArgument,
+        }
+        return result;
+    }
+
+    pub fn sigmoid(self: *Tensor, allocator: *std.mem.Allocator) !*Tensor {
+        var result: *Tensor = undefined;
+        switch (self.tipo) {
+            .CPU => {
+                const res = try Tensor.init_with_type(self.tipo, allocator, self.shape);
+                for (0..self.size) |i| {
+                    const v = self.get(i);
+                    const s = 1.0 / (1.0 + std.math.exp(-v));
+                    res.set(i, s);
+                }
+                const ud = try allocator.create(tensorImpl.AnyUserData);
+                ud.* = .{ .sigmoid = .{ .input = self.impl_ptr } };
+                res.impl_ptr.user = ud;
+                res.user_data = ud;
+                res.grad_fn = &cpu.cpu_sigmoid_backward;
+                // register CPU-created op output in autograd graph
+                res.next_in_graph = graph_head;
+                graph_head = res;
+                result = res;
+            },
+            .CPUSIMD => {
+                var out_impl = try cpusimd.create_impl(allocator, self.size);
+                for (0..self.size) |i| {
+                    const v = self.get(i);
+                    out_impl.data[i] = 1.0 / (1.0 + std.math.exp(-v));
+                }
+                var obj = try allocator.create(Tensor);
+                obj.tipo = .CPUSIMD;
+                obj.impl_ptr = out_impl;
+                var shape_buf = try allocator.alloc(usize, self.shape.len);
+                for (0..self.shape.len) |i| shape_buf[i] = self.shape[i];
+                obj.shape = shape_buf[0..self.shape.len];
+                obj.size = self.size;
+                obj.requires_grad = false;
+                const ud = try allocator.create(tensorImpl.AnyUserData);
+                ud.* = .{ .sigmoid = .{ .input = self.impl_ptr } };
+                out_impl.user = ud;
+                obj.user_data = ud;
+                obj.grad_fn = &cpusimd.simd_sigmoid_backward;
+                // register CPUSIMD-created Tensor in autograd graph
+                obj.next_in_graph = graph_head;
+                graph_head = obj;
                 result = obj;
             },
             else => return error.InvalidArgument,
@@ -295,7 +571,11 @@ pub const Tensor = struct {
                 const cud = try allocator.create(tensorImpl.AnyUserData);
                 cud.* = .{ .conv = .{ .input = self.impl_ptr, .kernel = kernel.impl_ptr, .hin = hin, .win = win, .kh = kh, .kw = kw } };
                 result.impl_ptr.user = cud;
+                result.user_data = cud;
                 result.grad_fn = &cpu.cpu_conv_backward;
+                // register CPU-created op output in autograd graph
+                result.next_in_graph = graph_head;
+                graph_head = result;
             },
             .CPUSIMD => {
                 const out_impl = try cpusimd.simd_conv(allocator, self.impl_ptr, hin, win, kernel.impl_ptr, kh, kw);
@@ -311,7 +591,11 @@ pub const Tensor = struct {
                 const ud = try allocator.create(tensorImpl.AnyUserData);
                 ud.* = .{ .conv = .{ .input = self.impl_ptr, .kernel = kernel.impl_ptr, .hin = hin, .win = win, .kh = kh, .kw = kw } };
                 out_impl.user = ud;
+                obj.user_data = ud;
                 obj.grad_fn = &cpusimd.simd_conv_backward;
+                // register CPUSIMD-created Tensor in autograd graph
+                obj.next_in_graph = graph_head;
+                graph_head = obj;
                 result = obj;
             },
             else => {
@@ -370,6 +654,7 @@ pub const Tensor = struct {
         obj.shape = shape_buf;
         obj.size = total;
         obj.requires_grad = false;
+        obj.user_data = null;
         return obj;
     }
 };
